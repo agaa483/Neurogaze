@@ -1,8 +1,4 @@
-# Model Training Prompt for Cursor
 
-Use this prompt when asking Cursor to create your model training script:
-
----
 
 **Create a Python script to train a machine learning model for ASD (Autism Spectrum Disorder) prediction from eye-tracking data.**
 
