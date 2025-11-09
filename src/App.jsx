@@ -7,6 +7,9 @@ import {
 } from '@mediapipe/face_mesh'
 import { Camera } from '@mediapipe/camera_utils'
 import { drawConnectors } from '@mediapipe/drawing_utils'
+import abstractImage from './assets/images/abstract.jpg'
+import cartoonNatureImage from './assets/images/cartoonnature.jpg'
+import portraitImage from './assets/images/portrait.jpg'
 
 const leftIrisIndices = [468, 469, 470, 471]
 const rightIrisIndices = [473, 474, 475, 476]
@@ -110,19 +113,286 @@ const computeLinearMapping = (pairs) => {
 }
 
 const ASSESSMENT_DURATION_MS = 30_000
-const CSV_HEADERS = [
-  'recording_time_ms',
-  'sample_timestamp_iso',
-  'category_right',
-  'category_left',
-  'pupil_diameter_right_mm',
-  'pupil_diameter_left_mm',
-  'point_of_regard_right_x',
-  'point_of_regard_right_y',
-  'point_of_regard_left_x',
-  'point_of_regard_left_y',
-  'tracking_ratio_percent',
+const IMAGE_DISPLAY_DURATION_MS = 10_000 // 10 seconds per image
+const ASSESSMENT_IMAGES = [
+  { src: abstractImage, name: 'Abstract Art' },
+  { src: cartoonNatureImage, name: 'Cartoon Nature' },
+  { src: portraitImage, name: 'Portrait' },
 ]
+
+// Aggregated feature headers matching training data format
+const AGGREGATED_CSV_HEADERS = [
+  'Tracking_F_1', 'Tracking_F_2', 'Tracking_F_3', 'Tracking_F_4',
+  'Pupil_Diam_1', 'Pupil_Diam_2', 'Pupil_Diam_3', 'Pupil_Diam_4', 'Pupil_Diam_5', 'Pupil_Diam_6',
+  'Pupil_Diam_7', 'Pupil_Diam_8', 'Pupil_Diam_9', 'Pupil_Diam_10', 'Pupil_Diam_11', 'Pupil_Diam_12',
+  'GazePoint_of_I_1', 'GazePoint_of_I_2', 'GazePoint_of_I_3', 'GazePoint_of_I_4', 'GazePoint_of_I_5', 'GazePoint_of_I_6',
+  'GazePoint_of_I_7', 'GazePoint_of_I_8', 'GazePoint_of_I_9', 'GazePoint_of_I_10', 'GazePoint_of_I_11', 'GazePoint_of_I_12',
+  'Recording_1', 'Recording_2', 'Recording_3',
+  'gaze_hori_1', 'gaze_hori_2', 'gaze_hori_3', 'gaze_hori_4',
+  'gaze_vert_1', 'gaze_vert_2', 'gaze_vert_3', 'gaze_vert_4',
+  'gaze_velo_1', 'gaze_velo_2', 'gaze_velo_3', 'gaze_velo_4',
+  'blink_count_1', 'blink_count_2', 'blink_count_3', 'blink_count_4',
+  'fix_count_1', 'fix_count_2', 'fix_count_3', 'fix_count_4',
+  'sac_count_1', 'sac_count_2', 'sac_count_3', 'sac_count_4',
+  'Source_File', 'level_2',
+  'trial_dur_1', 'trial_dur_2',
+  'sampling_rate_1',
+  'blink_rate_1', 'fixation_rate_1', 'saccade_rate_1',
+  'fix_dur_avg_1', 'sac_amp_avg_1', 'sac_peak_vel_avg_1',
+  'right_eye_c_1', 'right_eye_c_2', 'right_eye_c_3',
+  'left_eye_c_1', 'left_eye_c_2', 'left_eye_c_3',
+  'avg_eye_c_1', 'avg_eye_c_2', 'avg_eye_c_3',
+  'pupil_diam_avg_1', 'gaze_hori_avg_1', 'gaze_vert_avg_1',
+  'Participant', 'Gender', 'Age', 'Class', 'CARS_Score_is_ASD', 'Gender_encoded',
+]
+
+// Helper function to compute statistics
+const computeStats = (values) => {
+  if (!values || values.length === 0) {
+    return { mean: 0, std: 0, min: 0, max: 0, q1: 0, q3: 0, median: 0 }
+  }
+  const validValues = values.filter(v => v != null && !Number.isNaN(v) && Number.isFinite(v))
+  if (validValues.length === 0) {
+    return { mean: 0, std: 0, min: 0, max: 0, q1: 0, q3: 0, median: 0 }
+  }
+  const sorted = [...validValues].sort((a, b) => a - b)
+  const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length
+  const variance = sorted.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / sorted.length
+  const std = Math.sqrt(variance)
+  const min = sorted[0]
+  const max = sorted[sorted.length - 1]
+  const q1 = sorted[Math.floor(sorted.length * 0.25)]
+  const q3 = sorted[Math.floor(sorted.length * 0.75)]
+  const median = sorted[Math.floor(sorted.length * 0.5)]
+  return { mean, std, min, max, q1, q3, median }
+}
+
+// Feature engineering function to match training data format
+const computeAggregatedFeatures = (samples, age, gender) => {
+  if (!samples || samples.length === 0) {
+    return null
+  }
+
+  // Extract arrays for each metric
+  const trackingRatios = samples.map(s => s.trackingRatio).filter(v => v != null)
+  const pupilRight = samples.map(s => s.pupilDiameterRightMm).filter(v => v != null && v > 0)
+  const pupilLeft = samples.map(s => s.pupilDiameterLeftMm).filter(v => v != null && v > 0)
+  const porRightX = samples.map(s => s.pointOfRegardRightX).filter(v => v != null)
+  const porRightY = samples.map(s => s.pointOfRegardRightY).filter(v => v != null)
+  const porLeftX = samples.map(s => s.pointOfRegardLeftX).filter(v => v != null)
+  const porLeftY = samples.map(s => s.pointOfRegardLeftY).filter(v => v != null)
+  const recordingTimes = samples.map(s => s.recordingTimeMs).filter(v => v != null)
+
+  // Compute gaze velocities and movements
+  const gazeVelocitiesRight = []
+  const gazeVelocitiesLeft = []
+  const gazeHorizontalRight = []
+  const gazeVerticalRight = []
+  const gazeHorizontalLeft = []
+  const gazeVerticalLeft = []
+  const fixDurations = []
+  const saccadeAmplitudes = []
+  const saccadePeakVelocities = []
+
+  for (let i = 1; i < samples.length; i++) {
+    const prev = samples[i - 1]
+    const curr = samples[i]
+    const dt = (curr.recordingTimeMs - prev.recordingTimeMs) / 1000
+
+    if (dt > 0) {
+      // Right eye velocity
+      const dxRight = curr.pointOfRegardRightX - prev.pointOfRegardRightX
+      const dyRight = curr.pointOfRegardRightY - prev.pointOfRegardRightY
+      const velocityRight = Math.hypot(dxRight, dyRight) / dt
+      gazeVelocitiesRight.push(velocityRight)
+      gazeHorizontalRight.push(dxRight / dt)
+      gazeVerticalRight.push(dyRight / dt)
+
+      // Left eye velocity
+      const dxLeft = curr.pointOfRegardLeftX - prev.pointOfRegardLeftX
+      const dyLeft = curr.pointOfRegardLeftY - prev.pointOfRegardLeftY
+      const velocityLeft = Math.hypot(dxLeft, dyLeft) / dt
+      gazeVelocitiesLeft.push(velocityLeft)
+      gazeHorizontalLeft.push(dxLeft / dt)
+      gazeVerticalLeft.push(dyLeft / dt)
+
+      // Saccade amplitude (distance moved)
+      if (curr.categoryRight === 'Saccade' || curr.categoryLeft === 'Saccade') {
+        const amplitude = Math.hypot(dxRight + dxLeft, dyRight + dyLeft) / 2
+        saccadeAmplitudes.push(amplitude)
+        saccadePeakVelocities.push(Math.max(velocityRight, velocityLeft))
+      }
+
+      // Fixation duration (time spent in fixation)
+      if (curr.categoryRight === 'Fixation' && prev.categoryRight === 'Fixation') {
+        fixDurations.push(dt)
+      }
+    }
+  }
+
+  // Count eye movement categories (split into 4 time segments)
+  const segmentSize = Math.ceil(samples.length / 4)
+  const blinkCounts = [0, 0, 0, 0]
+  const fixCounts = [0, 0, 0, 0]
+  const sacCounts = [0, 0, 0, 0]
+
+  samples.forEach((sample, idx) => {
+    const segment = Math.min(3, Math.floor(idx / segmentSize))
+    if (sample.categoryRight === 'Blink' || sample.categoryLeft === 'Blink') blinkCounts[segment]++
+    if (sample.categoryRight === 'Fixation' || sample.categoryLeft === 'Fixation') fixCounts[segment]++
+    if (sample.categoryRight === 'Saccade' || sample.categoryLeft === 'Saccade') sacCounts[segment]++
+  })
+
+  // Compute statistics
+  const trackingStats = computeStats(trackingRatios)
+  const pupilRightStats = computeStats(pupilRight)
+  const pupilLeftStats = computeStats(pupilLeft)
+  const porRightXStats = computeStats(porRightX)
+  const porRightYStats = computeStats(porRightY)
+  const porLeftXStats = computeStats(porLeftX)
+  const porLeftYStats = computeStats(porLeftY)
+  const recordingTimeStats = {
+    count: recordingTimes.length,
+    min: recordingTimes.length > 0 ? Math.min(...recordingTimes) : 0,
+    max: recordingTimes.length > 0 ? Math.max(...recordingTimes) : 0,
+  }
+
+  const gazeHorizontalRightStats = computeStats(gazeHorizontalRight)
+  const gazeVerticalRightStats = computeStats(gazeVerticalRight)
+  const gazeVelocityRightStats = computeStats(gazeVelocitiesRight)
+  const gazeHorizontalLeftStats = computeStats(gazeHorizontalLeft)
+  const gazeVerticalLeftStats = computeStats(gazeVerticalLeft)
+  const gazeVelocityLeftStats = computeStats(gazeVelocitiesLeft)
+
+  // Combined gaze stats
+  const gazeHorizontalMean = (gazeHorizontalRightStats.mean + gazeHorizontalLeftStats.mean) / 2
+  const gazeHorizontalStd = Math.sqrt((Math.pow(gazeHorizontalRightStats.std, 2) + Math.pow(gazeHorizontalLeftStats.std, 2)) / 2)
+  const gazeVerticalMean = (gazeVerticalRightStats.mean + gazeVerticalLeftStats.mean) / 2
+  const gazeVerticalStd = Math.sqrt((Math.pow(gazeVerticalRightStats.std, 2) + Math.pow(gazeVerticalLeftStats.std, 2)) / 2)
+
+  // Trial duration
+  const trialDurationMs = recordingTimeStats.max - recordingTimeStats.min
+  const trialDurationSec = trialDurationMs > 0 ? trialDurationMs / 1000 : 1
+  const samplingRate = trialDurationSec > 0 ? samples.length / trialDurationSec : 0
+
+  // Rates per second
+  const blinkRate = trialDurationSec > 0 ? blinkCounts.reduce((a, b) => a + b, 0) / trialDurationSec : 0
+  const fixationRate = trialDurationSec > 0 ? fixCounts.reduce((a, b) => a + b, 0) / trialDurationSec : 0
+  const saccadeRate = trialDurationSec > 0 ? sacCounts.reduce((a, b) => a + b, 0) / trialDurationSec : 0
+
+  // Average fixation duration, saccade amplitude, saccade peak velocity
+  const fixDurAvg = fixDurations.length > 0 ? fixDurations.reduce((a, b) => a + b, 0) / fixDurations.length : 0
+  const sacAmpAvg = saccadeAmplitudes.length > 0 ? saccadeAmplitudes.reduce((a, b) => a + b, 0) / saccadeAmplitudes.length : 0
+  const sacPeakVelAvg = saccadePeakVelocities.length > 0 ? saccadePeakVelocities.reduce((a, b) => a + b, 0) / saccadePeakVelocities.length : 0
+
+  // Eye coordinates (mean, std, range)
+  const rightEyeC = {
+    mean: porRightXStats.mean,
+    std: porRightXStats.std,
+    range: porRightXStats.max - porRightXStats.min,
+  }
+  const leftEyeC = {
+    mean: porLeftXStats.mean,
+    std: porLeftXStats.std,
+    range: porLeftXStats.max - porLeftXStats.min,
+  }
+  const avgEyeC = {
+    mean: (porRightXStats.mean + porLeftXStats.mean) / 2,
+    std: (porRightXStats.std + porLeftXStats.std) / 2,
+    range: ((porRightXStats.max - porRightXStats.min) + (porLeftXStats.max - porLeftXStats.min)) / 2,
+  }
+
+  // Gender encoding (M=1, F=0, based on typical encoding)
+  const genderEncoded = gender === 'M' ? 1 : (gender === 'F' ? 0 : 0.5)
+
+  // Build feature array in exact order matching AGGREGATED_CSV_HEADERS
+  return {
+    'Tracking_F_1': trackingStats.mean,
+    'Tracking_F_2': trackingStats.std,
+    'Tracking_F_3': trackingStats.min,
+    'Tracking_F_4': trackingStats.max,
+    'Pupil_Diam_1': pupilRightStats.mean,
+    'Pupil_Diam_2': pupilRightStats.std,
+    'Pupil_Diam_3': pupilRightStats.min,
+    'Pupil_Diam_4': pupilRightStats.max,
+    'Pupil_Diam_5': pupilRightStats.q1,
+    'Pupil_Diam_6': pupilRightStats.q3,
+    'Pupil_Diam_7': pupilLeftStats.mean,
+    'Pupil_Diam_8': pupilLeftStats.std,
+    'Pupil_Diam_9': pupilLeftStats.min,
+    'Pupil_Diam_10': pupilLeftStats.max,
+    'Pupil_Diam_11': pupilLeftStats.q1,
+    'Pupil_Diam_12': pupilLeftStats.q3,
+    'GazePoint_of_I_1': porRightXStats.mean,
+    'GazePoint_of_I_2': porRightXStats.std,
+    'GazePoint_of_I_3': porRightXStats.min,
+    'GazePoint_of_I_4': porRightXStats.max,
+    'GazePoint_of_I_5': porRightYStats.mean,
+    'GazePoint_of_I_6': porRightYStats.std,
+    'GazePoint_of_I_7': porRightYStats.min,
+    'GazePoint_of_I_8': porRightYStats.max,
+    'GazePoint_of_I_9': porLeftXStats.mean,
+    'GazePoint_of_I_10': porLeftXStats.std,
+    'GazePoint_of_I_11': porLeftXStats.min,
+    'GazePoint_of_I_12': porLeftXStats.max,
+    'Recording_1': recordingTimeStats.count,
+    'Recording_2': recordingTimeStats.min,
+    'Recording_3': recordingTimeStats.max,
+    'gaze_hori_1': gazeHorizontalRightStats.mean,
+    'gaze_hori_2': gazeHorizontalRightStats.std,
+    'gaze_hori_3': gazeHorizontalLeftStats.mean,
+    'gaze_hori_4': gazeHorizontalLeftStats.std,
+    'gaze_vert_1': gazeVerticalRightStats.mean,
+    'gaze_vert_2': gazeVerticalRightStats.std,
+    'gaze_vert_3': gazeVerticalLeftStats.mean,
+    'gaze_vert_4': gazeVerticalLeftStats.std,
+    'gaze_velo_1': gazeVelocityRightStats.mean,
+    'gaze_velo_2': gazeVelocityRightStats.max,
+    'gaze_velo_3': gazeVelocityLeftStats.mean,
+    'gaze_velo_4': gazeVelocityLeftStats.max,
+    'blink_count_1': blinkCounts[0],
+    'blink_count_2': blinkCounts[1],
+    'blink_count_3': blinkCounts[2],
+    'blink_count_4': blinkCounts[3],
+    'fix_count_1': fixCounts[0],
+    'fix_count_2': fixCounts[1],
+    'fix_count_3': fixCounts[2],
+    'fix_count_4': fixCounts[3],
+    'sac_count_1': sacCounts[0],
+    'sac_count_2': sacCounts[1],
+    'sac_count_3': sacCounts[2],
+    'sac_count_4': sacCounts[3],
+    'Source_File': 'web-app',
+    'level_2': 'GazePoint_of_I',
+    'trial_dur_1': trialDurationMs,
+    'trial_dur_2': trialDurationSec,
+    'sampling_rate_1': samplingRate,
+    'blink_rate_1': blinkRate,
+    'fixation_rate_1': fixationRate,
+    'saccade_rate_1': saccadeRate,
+    'fix_dur_avg_1': fixDurAvg,
+    'sac_amp_avg_1': sacAmpAvg,
+    'sac_peak_vel_avg_1': sacPeakVelAvg,
+    'right_eye_c_1': rightEyeC.mean,
+    'right_eye_c_2': rightEyeC.std,
+    'right_eye_c_3': rightEyeC.range,
+    'left_eye_c_1': leftEyeC.mean,
+    'left_eye_c_2': leftEyeC.std,
+    'left_eye_c_3': leftEyeC.range,
+    'avg_eye_c_1': avgEyeC.mean,
+    'avg_eye_c_2': avgEyeC.std,
+    'avg_eye_c_3': avgEyeC.range,
+    'pupil_diam_avg_1': (pupilRightStats.mean + pupilLeftStats.mean) / 2,
+    'gaze_hori_avg_1': gazeHorizontalMean,
+    'gaze_vert_avg_1': gazeVerticalMean,
+    'Participant': 0, // Placeholder - not used in model
+    'Gender': gender || 'Unknown',
+    'Age': parseFloat(age) || 0,
+    'Class': 'Unknown', // Will be predicted by model
+    'CARS_Score_is_ASD': 0, // Placeholder - not used in model
+    'Gender_encoded': genderEncoded,
+  }
+}
 
 const formatCsvCell = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -284,6 +554,11 @@ function App() {
     samplesCaptured: 0,
     downloadUrl: '',
   })
+  const [userInfo, setUserInfo] = useState({
+    age: '',
+    gender: '',
+  })
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
 
   const resetCalibration = useCallback(() => {
     calibrationRef.current = {
@@ -333,26 +608,21 @@ function App() {
     assessmentRef.current.status = 'complete'
     const samples = assessmentRef.current.samples.slice()
 
-    const csvLines = [CSV_HEADERS.join(',')]
-    samples.forEach((sample) => {
-      csvLines.push(
-        [
-          sample.recordingTimeMs,
-          sample.timestampIso,
-          sample.categoryRight,
-          sample.categoryLeft,
-          sample.pupilDiameterRightMm,
-          sample.pupilDiameterLeftMm,
-          sample.pointOfRegardRightX,
-          sample.pointOfRegardRightY,
-          sample.pointOfRegardLeftX,
-          sample.pointOfRegardLeftY,
-          sample.trackingRatio,
-        ]
-          .map(formatCsvCell)
-          .join(',')
-      )
-    })
+    // Compute aggregated features matching training data format
+    const aggregatedFeatures = computeAggregatedFeatures(samples, userInfo.age, userInfo.gender)
+
+    if (!aggregatedFeatures) {
+      setError('Unable to compute features from samples.')
+      return
+    }
+
+    // Create CSV with aggregated features
+    const csvLines = [AGGREGATED_CSV_HEADERS.join(',')]
+    const row = AGGREGATED_CSV_HEADERS.map(header => {
+      const value = aggregatedFeatures[header]
+      return formatCsvCell(value)
+    }).join(',')
+    csvLines.push(row)
 
     const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -365,11 +635,7 @@ function App() {
       samplesCaptured: samples.length,
       downloadUrl: url,
     })
-
-    if (typeof window !== 'undefined') {
-      requestAnimationFrame(() => triggerCsvDownload(url))
-    }
-  }, [])
+  }, [userInfo.age, userInfo.gender])
 
   const resetAssessment = useCallback(() => {
     revokeObjectUrl(assessmentRef.current.downloadUrl)
@@ -385,11 +651,21 @@ function App() {
       startTimestamp: 0,
       downloadUrl: '',
     }
+    setCurrentImageIndex(0)
   }, [])
 
   const startAssessment = useCallback(() => {
     if (!isSupported) {
       setError('Camera access is required to capture data.')
+      return
+    }
+    if (!userInfo.age || !userInfo.gender) {
+      setError('Please enter age and gender before starting the assessment.')
+      return
+    }
+    const ageNum = parseFloat(userInfo.age)
+    if (isNaN(ageNum) || ageNum < 2 || ageNum > 18) {
+      setError('Age must be between 2 and 18.')
       return
     }
     if (assessmentRef.current.status === 'running') {
@@ -411,7 +687,8 @@ function App() {
       samplesCaptured: 0,
       downloadUrl: '',
     })
-  }, [assessment.downloadUrl, isSupported, setAssessment, setError])
+    setError('')
+  }, [assessment.downloadUrl, isSupported, userInfo.age, userInfo.gender, setAssessment, setError])
 
   const handleCsvDownload = useCallback(() => {
     if (assessment.downloadUrl) {
@@ -429,6 +706,9 @@ function App() {
       assessmentRef.current.startTimestamp = performance.now()
     }
 
+    // Reset to first image when assessment starts
+    setCurrentImageIndex(0)
+
     let rafId = 0
     const tick = () => {
       if (assessmentRef.current.status !== 'running') {
@@ -436,13 +716,23 @@ function App() {
       }
       const elapsed = performance.now() - assessmentRef.current.startTimestamp
       const remaining = Math.max(0, ASSESSMENT_DURATION_MS - elapsed)
+      
+      // Calculate which image should be shown (10 seconds per image)
+      const imageIndex = Math.min(
+        ASSESSMENT_IMAGES.length - 1,
+        Math.floor(elapsed / IMAGE_DISPLAY_DURATION_MS)
+      )
+      setCurrentImageIndex(imageIndex)
+      
       setAssessment((prev) =>
         prev.status === 'running' ? { ...prev, timeLeftMs: remaining } : prev
       )
+      
       if (remaining <= 0) {
         finalizeAssessment()
         return
       }
+      
       rafId = requestAnimationFrame(tick)
     }
 
@@ -568,15 +858,32 @@ function App() {
 
       canvasCtx.save()
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height)
-      canvasCtx.scale(-1, 1)
-      canvasCtx.translate(-canvasElement.width, 0)
-      canvasCtx.drawImage(image, 0, 0, canvasElement.width, canvasElement.height)
+      
+      // Only draw video frame if not in assessment (when images are showing)
+      const isInAssessment = assessmentRef.current.status === 'running'
+      if (!isInAssessment) {
+        canvasCtx.scale(-1, 1)
+        canvasCtx.translate(-canvasElement.width, 0)
+        canvasCtx.drawImage(image, 0, 0, canvasElement.width, canvasElement.height)
+        canvasCtx.restore()
+        canvasCtx.save()
+        // Re-apply transform for eye tracking visualization
+        canvasCtx.scale(-1, 1)
+        canvasCtx.translate(-canvasElement.width, 0)
+      }
 
       metricsInternalRef.current.samplesTotal += 1
 
       if (multiFaceLandmarks && multiFaceLandmarks.length > 0) {
         metricsInternalRef.current.samplesValid += 1
         const landmarks = multiFaceLandmarks[0]
+        
+        // Apply transform for eye tracking visualization
+        if (isInAssessment) {
+          canvasCtx.scale(-1, 1)
+          canvasCtx.translate(-canvasElement.width, 0)
+        }
+        
         drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, {
           color: '#14ffec',
           lineWidth: 1.5,
@@ -942,7 +1249,9 @@ function App() {
     Math.ceil(assessment.timeLeftMs / 1000)
   )
   const isCalibrationReady = calibration.status === 'complete'
-  const canStartAssessment = assessment.status !== 'running' && isCalibrationReady
+  const hasUserInfo = userInfo.age && userInfo.gender
+  const ageValid = hasUserInfo && !isNaN(parseFloat(userInfo.age)) && parseFloat(userInfo.age) >= 2 && parseFloat(userInfo.age) <= 18
+  const canStartAssessment = assessment.status !== 'running' && isCalibrationReady && hasUserInfo && ageValid
 
   return (
     <div className="app">
@@ -953,6 +1262,51 @@ function App() {
           MediaPipe FaceMesh.
         </p>
       </header>
+
+      <section className="user-info-section">
+        <div className="user-info-header">
+          <h2>Participant Information</h2>
+          <p>Please provide age and gender for accurate analysis</p>
+        </div>
+        <div className="user-info-inputs">
+          <div className="input-group">
+            <label htmlFor="age">Age</label>
+            <input
+              id="age"
+              type="number"
+              min="2"
+              max="18"
+              value={userInfo.age}
+              onChange={(e) => {
+                const val = e.target.value
+                if (val === '' || (parseFloat(val) >= 2 && parseFloat(val) <= 18)) {
+                  setUserInfo({ ...userInfo, age: val })
+                }
+              }}
+              placeholder="Enter age (2-18)"
+              disabled={assessment.status === 'running'}
+            />
+          </div>
+          <div className="input-group">
+            <label htmlFor="gender">Gender</label>
+            <select
+              id="gender"
+              value={userInfo.gender}
+              onChange={(e) => setUserInfo({ ...userInfo, gender: e.target.value })}
+              disabled={assessment.status === 'running'}
+            >
+              <option value="">Select gender</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+        </div>
+        {(!userInfo.age || !userInfo.gender) && assessment.status === 'idle' && (
+          <p className="user-info-hint">
+            Please enter age (2-18) and gender before starting the assessment.
+          </p>
+        )}
+      </section>
 
       <section className="calibration-controls">
         <div className="calibration-copy">
@@ -1056,18 +1410,32 @@ function App() {
             Complete calibration before starting the capture run.
           </p>
         )}
+        {(!hasUserInfo || !ageValid) && assessment.status === 'idle' && (
+          <p className="assessment-hint">
+            Please enter valid age (2-18) and gender in the Participant Information section above.
+          </p>
+        )}
         {assessment.status === 'complete' && (
           <p className="assessment-hint success">
-            Capture finished. CSV downloaded with {assessment.samplesCaptured}{' '}
+            Capture finished. Ready to download CSV with {assessment.samplesCaptured}{' '}
             samples.
           </p>
         )}
       </section>
 
       <div className="viewer">
+        {assessment.status === 'running' && ASSESSMENT_IMAGES[currentImageIndex] && (
+          <div className="assessment-image-container">
+            <img
+              src={ASSESSMENT_IMAGES[currentImageIndex].src}
+              alt={ASSESSMENT_IMAGES[currentImageIndex].name}
+              className="assessment-image"
+            />
+          </div>
+        )}
         <video
           ref={videoRef}
-          className="video"
+          className={`video ${assessment.status === 'running' ? 'video-hidden' : ''}`}
           playsInline
           muted
           autoPlay
@@ -1083,6 +1451,13 @@ function App() {
               top: `${activeCalibrationPoint.y * 100}%`,
             }}
           />
+        )}
+        {assessment.status === 'running' && (
+          <div className="image-navigation">
+            <div className="image-counter">
+              Image {currentImageIndex + 1} of {ASSESSMENT_IMAGES.length}
+            </div>
+          </div>
         )}
       </div>
 
