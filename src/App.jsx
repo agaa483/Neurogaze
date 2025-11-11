@@ -120,7 +120,8 @@ const ASSESSMENT_IMAGES = [
   { src: portraitImage, name: 'Portrait' },
 ]
 
-// Aggregated feature headers matching training data format
+// Aggregated feature headers matching training data format (69 features)
+// Removed 6 redundant average features: avg_eye_c_1-3, pupil_diam_avg_1, gaze_hori_avg_1, gaze_vert_avg_1
 const AGGREGATED_CSV_HEADERS = [
   'Tracking_F_1', 'Tracking_F_2', 'Tracking_F_3', 'Tracking_F_4',
   'Pupil_Diam_1', 'Pupil_Diam_2', 'Pupil_Diam_3', 'Pupil_Diam_4', 'Pupil_Diam_5', 'Pupil_Diam_6',
@@ -141,8 +142,9 @@ const AGGREGATED_CSV_HEADERS = [
   'fix_dur_avg_1', 'sac_amp_avg_1', 'sac_peak_vel_avg_1',
   'right_eye_c_1', 'right_eye_c_2', 'right_eye_c_3',
   'left_eye_c_1', 'left_eye_c_2', 'left_eye_c_3',
-  'avg_eye_c_1', 'avg_eye_c_2', 'avg_eye_c_3',
-  'pupil_diam_avg_1', 'gaze_hori_avg_1', 'gaze_vert_avg_1',
+  // REMOVED: 'avg_eye_c_1', 'avg_eye_c_2', 'avg_eye_c_3',  // Redundant averages
+  // REMOVED: 'pupil_diam_avg_1',  // Redundant average
+  // REMOVED: 'gaze_hori_avg_1', 'gaze_vert_avg_1',  // Redundant averages
   'Participant', 'Gender', 'Age', 'Class', 'CARS_Score_is_ASD', 'Gender_encoded',
 ]
 
@@ -379,12 +381,9 @@ const computeAggregatedFeatures = (samples, age, gender) => {
     'left_eye_c_1': leftEyeC.mean,
     'left_eye_c_2': leftEyeC.std,
     'left_eye_c_3': leftEyeC.range,
-    'avg_eye_c_1': avgEyeC.mean,
-    'avg_eye_c_2': avgEyeC.std,
-    'avg_eye_c_3': avgEyeC.range,
-    'pupil_diam_avg_1': (pupilRightStats.mean + pupilLeftStats.mean) / 2,
-    'gaze_hori_avg_1': gazeHorizontalMean,
-    'gaze_vert_avg_1': gazeVerticalMean,
+    // REMOVED: avg_eye_c_1-3 (redundant - model can learn from individual eyes)
+    // REMOVED: pupil_diam_avg_1 (redundant - model can learn from individual pupil stats)
+    // REMOVED: gaze_hori_avg_1, gaze_vert_avg_1 (redundant - model can learn from per-eye stats)
     'Participant': 0, // Placeholder - not used in model
     'Gender': gender || 'Unknown',
     'Age': parseFloat(age) || 0,
@@ -1354,6 +1353,94 @@ function App() {
         )}
       </section>
 
+      <div className="viewer-metrics-container">
+        <section className="metrics metrics-side">
+          <h2>Live Biomarkers</h2>
+          <div className="metrics-grid">
+            <div className="metric-card">
+              <span className="metric-label">Recording time</span>
+              <span className="metric-value">
+                {(metrics.recordingTimeMs / 1000).toFixed(2)}s
+              </span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Right eye state</span>
+              <span className="metric-value">{metrics.categoryRight}</span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Left eye state</span>
+              <span className="metric-value">{metrics.categoryLeft}</span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Right pupil</span>
+              <span className="metric-value">
+                {metrics.pupilDiameterRightMm.toFixed(2)} mm
+              </span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Left pupil</span>
+              <span className="metric-value">
+                {metrics.pupilDiameterLeftMm.toFixed(2)} mm
+              </span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Right gaze</span>
+              <span className="metric-value">
+                {metrics.pointOfRegardRightX}, {metrics.pointOfRegardRightY}
+              </span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Left gaze</span>
+              <span className="metric-value">
+                {metrics.pointOfRegardLeftX}, {metrics.pointOfRegardLeftY}
+              </span>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Tracking</span>
+              <span className="metric-value">{metrics.trackingRatio.toFixed(2)}%</span>
+            </div>
+          </div>
+        </section>
+
+        <div className="viewer">
+          {assessment.status === 'running' && ASSESSMENT_IMAGES[currentImageIndex] && (
+            <div className="assessment-image-container">
+              <img
+                src={ASSESSMENT_IMAGES[currentImageIndex].src}
+                alt={ASSESSMENT_IMAGES[currentImageIndex].name}
+                className="assessment-image"
+              />
+            </div>
+          )}
+          <video
+            ref={videoRef}
+            className={`video ${assessment.status === 'running' ? 'video-hidden' : ''}`}
+            playsInline
+            muted
+            autoPlay
+            aria-hidden
+          />
+          <canvas ref={canvasRef} className="overlay" />
+          <span className={`status-badge status-${status}`}>{statusLabel}</span>
+          {activeCalibrationPoint && (
+            <div
+              className="calibration-target"
+              style={{
+                left: `${activeCalibrationPoint.x * 100}%`,
+                top: `${activeCalibrationPoint.y * 100}%`,
+              }}
+            />
+          )}
+          {assessment.status === 'running' && (
+            <div className="image-navigation">
+              <div className="image-counter">
+                Image {currentImageIndex + 1} of {ASSESSMENT_IMAGES.length}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <section className="assessment-runner">
         <div className="assessment-header">
           <h2>30-Second Data Capture</h2>
@@ -1423,104 +1510,11 @@ function App() {
         )}
       </section>
 
-      <div className="viewer">
-        {assessment.status === 'running' && ASSESSMENT_IMAGES[currentImageIndex] && (
-          <div className="assessment-image-container">
-            <img
-              src={ASSESSMENT_IMAGES[currentImageIndex].src}
-              alt={ASSESSMENT_IMAGES[currentImageIndex].name}
-              className="assessment-image"
-            />
-          </div>
-        )}
-        <video
-          ref={videoRef}
-          className={`video ${assessment.status === 'running' ? 'video-hidden' : ''}`}
-          playsInline
-          muted
-          autoPlay
-          aria-hidden
-        />
-        <canvas ref={canvasRef} className="overlay" />
-        <span className={`status-badge status-${status}`}>{statusLabel}</span>
-        {activeCalibrationPoint && (
-          <div
-            className="calibration-target"
-            style={{
-              left: `${activeCalibrationPoint.x * 100}%`,
-              top: `${activeCalibrationPoint.y * 100}%`,
-            }}
-          />
-        )}
-        {assessment.status === 'running' && (
-          <div className="image-navigation">
-            <div className="image-counter">
-              Image {currentImageIndex + 1} of {ASSESSMENT_IMAGES.length}
-            </div>
-          </div>
-        )}
-      </div>
-
       {error && (
         <div className="error-message">
           <strong>Heads up:</strong> {error}
         </div>
       )}
-
-      <section className="metrics">
-        <h2>Live Biomarkers</h2>
-        <div className="metrics-grid">
-          <div className="metric-card">
-            <span className="metric-label">Recording time</span>
-            <span className="metric-value">
-              {(metrics.recordingTimeMs / 1000).toFixed(2)}s
-            </span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Right eye state</span>
-            <span className="metric-value">{metrics.categoryRight}</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Left eye state</span>
-            <span className="metric-value">{metrics.categoryLeft}</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Right pupil diameter</span>
-            <span className="metric-value">
-              {metrics.pupilDiameterRightMm.toFixed(2)} mm
-            </span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Left pupil diameter</span>
-            <span className="metric-value">
-              {metrics.pupilDiameterLeftMm.toFixed(2)} mm
-            </span>
-          </div>
-          <div className="metric-card metric-card--wide">
-            <span className="metric-label">Right gaze (X, Y)</span>
-            <span className="metric-value">
-              {metrics.pointOfRegardRightX}, {metrics.pointOfRegardRightY}
-            </span>
-            <span className="metric-subtext">pixels</span>
-          </div>
-          <div className="metric-card metric-card--wide">
-            <span className="metric-label">Left gaze (X, Y)</span>
-            <span className="metric-value">
-              {metrics.pointOfRegardLeftX}, {metrics.pointOfRegardLeftY}
-            </span>
-            <span className="metric-subtext">pixels</span>
-          </div>
-          <div className="metric-card metric-card--wide">
-            <span className="metric-label">Tracking ratio</span>
-            <span className="metric-value">{metrics.trackingRatio.toFixed(2)}%</span>
-          </div>
-        </div>
-        <p className="metric-footnote">
-          Metrics stream with each MediaPipe frame. Tracking ratio shows the
-          share of valid samples; run calibration to align gaze coordinates
-          before exporting data.
-        </p>
-      </section>
 
       <footer className="footer">
         <p>
