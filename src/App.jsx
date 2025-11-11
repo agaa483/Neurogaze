@@ -120,12 +120,12 @@ const ASSESSMENT_IMAGES = [
   { src: portraitImage, name: 'Portrait' },
 ]
 
-// Aggregated feature headers matching training data format (69 features)
-// Removed 6 redundant average features: avg_eye_c_1-3, pupil_diam_avg_1, gaze_hori_avg_1, gaze_vert_avg_1
+// Aggregated feature headers matching training data format (60 features)
+// Removed: Pupil_Diam_1-12 (MediaPipe cannot directly measure pupil diameter)
+// Removed: 6 redundant average features: avg_eye_c_1-3, pupil_diam_avg_1, gaze_hori_avg_1, gaze_vert_avg_1
 const AGGREGATED_CSV_HEADERS = [
   'Tracking_F_1', 'Tracking_F_2', 'Tracking_F_3', 'Tracking_F_4',
-  'Pupil_Diam_1', 'Pupil_Diam_2', 'Pupil_Diam_3', 'Pupil_Diam_4', 'Pupil_Diam_5', 'Pupil_Diam_6',
-  'Pupil_Diam_7', 'Pupil_Diam_8', 'Pupil_Diam_9', 'Pupil_Diam_10', 'Pupil_Diam_11', 'Pupil_Diam_12',
+  // REMOVED: Pupil_Diam_1-12 (MediaPipe cannot directly measure pupil diameter)
   'GazePoint_of_I_1', 'GazePoint_of_I_2', 'GazePoint_of_I_3', 'GazePoint_of_I_4', 'GazePoint_of_I_5', 'GazePoint_of_I_6',
   'GazePoint_of_I_7', 'GazePoint_of_I_8', 'GazePoint_of_I_9', 'GazePoint_of_I_10', 'GazePoint_of_I_11', 'GazePoint_of_I_12',
   'Recording_1', 'Recording_2', 'Recording_3',
@@ -141,11 +141,11 @@ const AGGREGATED_CSV_HEADERS = [
   'blink_rate_1', 'fixation_rate_1', 'saccade_rate_1',
   'fix_dur_avg_1', 'sac_amp_avg_1', 'sac_peak_vel_avg_1',
   'right_eye_c_1', 'right_eye_c_2', 'right_eye_c_3',
-  'left_eye_c_1', 'left_eye_c_2', 'left_eye_c_3',
-  // REMOVED: 'avg_eye_c_1', 'avg_eye_c_2', 'avg_eye_c_3',  // Redundant averages
-  // REMOVED: 'pupil_diam_avg_1',  // Redundant average
-  // REMOVED: 'gaze_hori_avg_1', 'gaze_vert_avg_1',  // Redundant averages
-  'Participant', 'Gender', 'Age', 'Class', 'CARS_Score_is_ASD', 'Gender_encoded',
+    'left_eye_c_1', 'left_eye_c_2', 'left_eye_c_3',
+    // REMOVED: 'avg_eye_c_1', 'avg_eye_c_2', 'avg_eye_c_3',  // Redundant averages
+    // REMOVED: 'pupil_diam_avg_1',  // Redundant average
+    // REMOVED: 'gaze_hori_avg_1', 'gaze_vert_avg_1',  // Redundant averages
+    'Participant', 'Gender', 'Age', 'Gender_encoded', 'Class', 'CARS_Score_is_ASD',
 ]
 
 // Helper function to compute statistics
@@ -177,8 +177,7 @@ const computeAggregatedFeatures = (samples, age, gender) => {
 
   // Extract arrays for each metric
   const trackingRatios = samples.map(s => s.trackingRatio).filter(v => v != null)
-  const pupilRight = samples.map(s => s.pupilDiameterRightMm).filter(v => v != null && v > 0)
-  const pupilLeft = samples.map(s => s.pupilDiameterLeftMm).filter(v => v != null && v > 0)
+  // REMOVED: Pupil diameter extraction (MediaPipe cannot directly measure pupil diameter)
   const porRightX = samples.map(s => s.pointOfRegardRightX).filter(v => v != null)
   const porRightY = samples.map(s => s.pointOfRegardRightY).filter(v => v != null)
   const porLeftX = samples.map(s => s.pointOfRegardLeftX).filter(v => v != null)
@@ -247,8 +246,7 @@ const computeAggregatedFeatures = (samples, age, gender) => {
 
   // Compute statistics
   const trackingStats = computeStats(trackingRatios)
-  const pupilRightStats = computeStats(pupilRight)
-  const pupilLeftStats = computeStats(pupilLeft)
+  // REMOVED: Pupil diameter stats (MediaPipe cannot directly measure pupil diameter)
   const porRightXStats = computeStats(porRightX)
   const porRightYStats = computeStats(porRightY)
   const porLeftXStats = computeStats(porLeftX)
@@ -313,18 +311,7 @@ const computeAggregatedFeatures = (samples, age, gender) => {
     'Tracking_F_2': trackingStats.std,
     'Tracking_F_3': trackingStats.min,
     'Tracking_F_4': trackingStats.max,
-    'Pupil_Diam_1': pupilRightStats.mean,
-    'Pupil_Diam_2': pupilRightStats.std,
-    'Pupil_Diam_3': pupilRightStats.min,
-    'Pupil_Diam_4': pupilRightStats.max,
-    'Pupil_Diam_5': pupilRightStats.q1,
-    'Pupil_Diam_6': pupilRightStats.q3,
-    'Pupil_Diam_7': pupilLeftStats.mean,
-    'Pupil_Diam_8': pupilLeftStats.std,
-    'Pupil_Diam_9': pupilLeftStats.min,
-    'Pupil_Diam_10': pupilLeftStats.max,
-    'Pupil_Diam_11': pupilLeftStats.q1,
-    'Pupil_Diam_12': pupilLeftStats.q3,
+    // REMOVED: Pupil_Diam_1-12 (MediaPipe cannot directly measure pupil diameter)
     'GazePoint_of_I_1': porRightXStats.mean,
     'GazePoint_of_I_2': porRightXStats.std,
     'GazePoint_of_I_3': porRightXStats.min,
@@ -387,9 +374,9 @@ const computeAggregatedFeatures = (samples, age, gender) => {
     'Participant': 0, // Placeholder - not used in model
     'Gender': gender || 'Unknown',
     'Age': parseFloat(age) || 0,
+    'Gender_encoded': genderEncoded,
     'Class': 'Unknown', // Will be predicted by model
     'CARS_Score_is_ASD': 0, // Placeholder - not used in model
-    'Gender_encoded': genderEncoded,
   }
 }
 
@@ -513,8 +500,6 @@ function App() {
     recordingTimeMs: 0,
     categoryRight: 'Unknown',
     categoryLeft: 'Unknown',
-    pupilDiameterRightMm: 0,
-    pupilDiameterLeftMm: 0,
     pointOfRegardRightX: 0,
     pointOfRegardRightY: 0,
     pointOfRegardLeftX: 0,
@@ -615,9 +600,11 @@ function App() {
       return
     }
 
-    // Create CSV with aggregated features
-    const csvLines = [AGGREGATED_CSV_HEADERS.join(',')]
-    const row = AGGREGATED_CSV_HEADERS.map(header => {
+    // Create CSV with aggregated features (excluding metadata columns and Class - Class is what we're predicting, not a feature)
+    const metadataColumns = ['Source_File', 'level_2', 'Participant', 'Gender', 'CARS_Score_is_ASD', 'Class']
+    const csvHeaders = AGGREGATED_CSV_HEADERS.filter(header => !metadataColumns.includes(header))
+    const csvLines = [csvHeaders.join(',')]
+    const row = csvHeaders.map(header => {
       const value = aggregatedFeatures[header]
       return formatCsvCell(value)
     }).join(',')
@@ -1065,14 +1052,7 @@ function App() {
           const rightScale =
             rightEyeWidthPx > 0 ? AVERAGE_EYE_WIDTH_MM / rightEyeWidthPx : 0
 
-          const leftPupilDiameterMm =
-            leftGeometry && leftScale
-              ? Number((leftGeometry.radius * 2 * leftScale).toFixed(2))
-              : 0
-          const rightPupilDiameterMm =
-            rightGeometry && rightScale
-              ? Number((rightGeometry.radius * 2 * rightScale).toFixed(2))
-              : 0
+          // REMOVED: Pupil diameter calculation (MediaPipe cannot directly measure pupil diameter)
 
           const correctedLeft = applyCalibration(
             calibrationRef.current.models.left,
@@ -1125,8 +1105,6 @@ function App() {
             recordingTimeMs: elapsedMs,
             categoryRight,
             categoryLeft,
-            pupilDiameterRightMm: rightPupilDiameterMm,
-            pupilDiameterLeftMm: leftPupilDiameterMm,
             pointOfRegardRightX: pointOfRegardRight.x,
             pointOfRegardRightY: pointOfRegardRight.y,
             pointOfRegardLeftX: pointOfRegardLeft.x,
@@ -1145,12 +1123,6 @@ function App() {
               timestampIso: new Date().toISOString(),
               categoryRight,
               categoryLeft,
-              pupilDiameterRightMm: Number(
-                nextMetrics.pupilDiameterRightMm.toFixed(2)
-              ),
-              pupilDiameterLeftMm: Number(
-                nextMetrics.pupilDiameterLeftMm.toFixed(2)
-              ),
               pointOfRegardRightX: nextMetrics.pointOfRegardRightX,
               pointOfRegardRightY: nextMetrics.pointOfRegardRightY,
               pointOfRegardLeftX: nextMetrics.pointOfRegardLeftX,
@@ -1371,18 +1343,7 @@ function App() {
               <span className="metric-label">Left eye state</span>
               <span className="metric-value">{metrics.categoryLeft}</span>
             </div>
-            <div className="metric-card">
-              <span className="metric-label">Right pupil</span>
-              <span className="metric-value">
-                {metrics.pupilDiameterRightMm.toFixed(2)} mm
-              </span>
-            </div>
-            <div className="metric-card">
-              <span className="metric-label">Left pupil</span>
-              <span className="metric-value">
-                {metrics.pupilDiameterLeftMm.toFixed(2)} mm
-              </span>
-            </div>
+            {/* REMOVED: Pupil diameter display (MediaPipe cannot directly measure pupil diameter) */}
             <div className="metric-card">
               <span className="metric-label">Right gaze</span>
               <span className="metric-value">
