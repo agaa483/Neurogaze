@@ -1221,7 +1221,9 @@ function App() {
   )
   const isCalibrationReady = calibration.status === 'complete'
   const hasUserInfo = userInfo.age && userInfo.gender
-  const ageValid = hasUserInfo && !isNaN(parseFloat(userInfo.age)) && parseFloat(userInfo.age) >= 2 && parseFloat(userInfo.age) <= 18
+  // Validate age is in pediatric range (2.7-12.9 years) - model was trained on this range
+  const ageNum = parseFloat(userInfo.age)
+  const ageValid = hasUserInfo && !isNaN(ageNum) && ageNum >= 2.7 && ageNum <= 12.9
   const canStartAssessment = assessment.status !== 'running' && isCalibrationReady && hasUserInfo && ageValid
 
   return (
@@ -1241,22 +1243,24 @@ function App() {
         </div>
         <div className="user-info-inputs">
           <div className="input-group">
-            <label htmlFor="age">Age</label>
+            <label htmlFor="age">Age (in years, decimal format)</label>
             <input
               id="age"
-              type="number"
-              min="2"
-              max="18"
+              type="text"
               value={userInfo.age}
               onChange={(e) => {
                 const val = e.target.value
-                if (val === '' || (parseFloat(val) >= 2 && parseFloat(val) <= 18)) {
+                // Allow empty, numbers, and one decimal point
+                if (val === '' || /^\d*\.?\d*$/.test(val)) {
                   setUserInfo({ ...userInfo, age: val })
                 }
               }}
-              placeholder="Enter age (2-18)"
+              placeholder="e.g., 5.5"
               disabled={assessment.status === 'running'}
             />
+            <small className="age-example">
+              Example: 1 year 6 months = 1.5
+            </small>
           </div>
           <div className="input-group">
             <label htmlFor="gender">Gender</label>
@@ -1274,7 +1278,12 @@ function App() {
         </div>
         {(!userInfo.age || !userInfo.gender) && assessment.status === 'idle' && (
           <p className="user-info-hint">
-            Please enter age (2-18) and gender before starting the assessment.
+            Please enter age (2.7-12.9 years) and gender before starting the assessment.
+          </p>
+        )}
+        {userInfo.age && !ageValid && assessment.status === 'idle' && (
+          <p className="user-info-hint" style={{ color: 'rgba(239, 68, 68, 0.9)' }}>
+            Age must be between 2.7 and 12.9 years (model trained on pediatric data).
           </p>
         )}
       </section>

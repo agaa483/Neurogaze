@@ -617,6 +617,13 @@
   text-align: center;
 }
 
+.age-example {
+  font-size: 0.75rem;
+  color: rgba(148, 163, 184, 0.7);
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
 .prediction-section {
   width: 100%;
   display: flex;
