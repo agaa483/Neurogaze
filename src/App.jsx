@@ -419,6 +419,12 @@ const applyCalibration = (model, point) => {
   if (!point || !model) {
     return point ?? null
   }
+  // Check if model is valid (has been calibrated, not just default)
+  const isDefaultModel = model.scaleX === 1 && model.offsetX === 0 && model.scaleY === 1 && model.offsetY === 0
+  if (isDefaultModel) {
+    // Return uncalibrated point if using default model
+    return point
+  }
   return {
     x: clamp(model.scaleX * point.x + model.offsetX, 0, 1),
     y: clamp(model.scaleY * point.y + model.offsetY, 0, 1),
@@ -538,6 +544,11 @@ function App() {
     samplesCaptured: 0,
     downloadUrl: '',
   })
+  const [prediction, setPrediction] = useState({
+    loading: false,
+    result: null,
+    error: null,
+  })
   const [userInfo, setUserInfo] = useState({
     age: '',
     gender: '',
@@ -600,27 +611,47 @@ function App() {
       return
     }
 
-    // Create CSV with aggregated features (excluding metadata columns and Class - Class is what we're predicting, not a feature)
+    // Prepare features for API (58 features - exclude metadata, Class, sac_amp_avg_1, sac_peak_vel_avg_1)
     const metadataColumns = ['Source_File', 'level_2', 'Participant', 'Gender', 'CARS_Score_is_ASD', 'Class']
-    const csvHeaders = AGGREGATED_CSV_HEADERS.filter(header => !metadataColumns.includes(header))
-    const csvLines = [csvHeaders.join(',')]
-    const row = csvHeaders.map(header => {
-      const value = aggregatedFeatures[header]
-      return formatCsvCell(value)
-    }).join(',')
-    csvLines.push(row)
+    const apiExcludedFeatures = ['sac_amp_avg_1', 'sac_peak_vel_avg_1']
+    const apiFeatures = {}
+    
+    AGGREGATED_CSV_HEADERS.forEach(header => {
+      if (!metadataColumns.includes(header) && !apiExcludedFeatures.includes(header)) {
+        apiFeatures[header] = aggregatedFeatures[header]
+      }
+    })
 
-    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    revokeObjectUrl(assessmentRef.current.downloadUrl)
-    assessmentRef.current.downloadUrl = url
-
+    // Send to prediction API
+    setPrediction({ loading: true, result: null, error: null })
     setAssessment({
       status: 'complete',
       timeLeftMs: 0,
       samplesCaptured: samples.length,
-      downloadUrl: url,
+      downloadUrl: '',
     })
+
+    fetch('http://localhost:8000/predict', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(apiFeatures),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: `API error: ${response.statusText}` }))
+          throw new Error(errorData.detail || `API error: ${response.statusText}`)
+        }
+        return response.json()
+      })
+      .then((data) => {
+        setPrediction({ loading: false, result: data, error: null })
+      })
+      .catch((err) => {
+        setPrediction({ loading: false, result: null, error: err.message })
+        setError(`Prediction failed: ${err.message}`)
+      })
   }, [userInfo.age, userInfo.gender])
 
   const resetAssessment = useCallback(() => {
@@ -1054,23 +1085,39 @@ function App() {
 
           // REMOVED: Pupil diameter calculation (MediaPipe cannot directly measure pupil diameter)
 
-          const correctedLeft = applyCalibration(
-            calibrationRef.current.models.left,
-            leftIrisCenter
-          )
-          const correctedRight = applyCalibration(
-            calibrationRef.current.models.right,
-            rightIrisCenter
-          )
+          // Apply calibration if we have valid iris centers and calibration is complete
+          const hasCalibration = calibrationRef.current.status === 'complete'
+          let correctedLeft = null
+          let correctedRight = null
+          
+          if (leftIrisCenter && hasCalibration) {
+            correctedLeft = applyCalibration(
+              calibrationRef.current.models.left,
+              leftIrisCenter
+            )
+          } else if (leftIrisCenter) {
+            // Use uncalibrated point if calibration not complete
+            correctedLeft = leftIrisCenter
+          }
+          
+          if (rightIrisCenter && hasCalibration) {
+            correctedRight = applyCalibration(
+              calibrationRef.current.models.right,
+              rightIrisCenter
+            )
+          } else if (rightIrisCenter) {
+            // Use uncalibrated point if calibration not complete
+            correctedRight = rightIrisCenter
+          }
 
-          const pointOfRegardLeft = correctedLeft
+          const pointOfRegardLeft = correctedLeft && correctedLeft.x != null && correctedLeft.y != null
             ? {
                 x: Number((correctedLeft.x * image.width).toFixed(0)),
                 y: Number((correctedLeft.y * image.height).toFixed(0)),
               }
             : { x: 0, y: 0 }
 
-          const pointOfRegardRight = correctedRight
+          const pointOfRegardRight = correctedRight && correctedRight.x != null && correctedRight.y != null
             ? {
                 x: Number((correctedRight.x * image.width).toFixed(0)),
                 y: Number((correctedRight.y * image.height).toFixed(0)),
@@ -1415,8 +1462,8 @@ function App() {
         <div className="assessment-header">
           <h2>30-Second Data Capture</h2>
           <p>
-            Collects calibrated gaze samples for 30 seconds and exports them to
-            CSV automatically.
+            Collects calibrated gaze samples for 30 seconds and analyzes them
+            using the ASD prediction model.
           </p>
         </div>
         <div className="assessment-timer">
@@ -1447,19 +1494,55 @@ function App() {
             disabled={
               assessment.status === 'idle' &&
               assessment.samplesCaptured === 0 &&
-              !assessment.downloadUrl
+              !prediction.result &&
+              !prediction.loading
             }
           >
             {assessment.status === 'running' ? 'Cancel Capture' : 'Reset'}
           </button>
-          {assessment.status === 'complete' && assessment.downloadUrl && (
-            <button
-              type="button"
-              className="control-btn secondary"
-              onClick={handleCsvDownload}
-            >
-              Download CSV
-            </button>
+          {prediction.loading && (
+            <div className="prediction-loading">
+              <p>Analyzing eye-tracking data...</p>
+            </div>
+          )}
+          {prediction.error && (
+            <div className="prediction-error">
+              <p>Error: {prediction.error}</p>
+              <p className="error-hint">Make sure the API server is running at http://localhost:8000</p>
+            </div>
+          )}
+          {prediction.result && (
+            <div className="prediction-result">
+              <h3>Assessment Result</h3>
+              <div className="prediction-card">
+                <div className="prediction-main">
+                  <span className="prediction-label">Prediction:</span>
+                  <span className={`prediction-value prediction-${prediction.result.prediction.toLowerCase()}`}>
+                    {prediction.result.prediction}
+                  </span>
+                </div>
+                <div className="prediction-probabilities">
+                  <div className="probability-item">
+                    <span className="probability-label">ASD Probability:</span>
+                    <span className="probability-value">
+                      {(prediction.result.probability_asd * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="probability-item">
+                    <span className="probability-label">TD Probability:</span>
+                    <span className="probability-value">
+                      {(prediction.result.probability_td * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+                <div className="prediction-confidence">
+                  <span className="confidence-label">Confidence:</span>
+                  <span className={`confidence-value confidence-${prediction.result.confidence.toLowerCase()}`}>
+                    {prediction.result.confidence}
+                  </span>
+                </div>
+              </div>
+            </div>
           )}
         </div>
         {!isCalibrationReady && (
@@ -1474,8 +1557,7 @@ function App() {
         )}
         {assessment.status === 'complete' && (
           <p className="assessment-hint success">
-            Capture finished. Ready to download CSV with {assessment.samplesCaptured}{' '}
-            samples.
+            Capture finished. Processing {assessment.samplesCaptured} samples...
           </p>
         )}
       </section>
