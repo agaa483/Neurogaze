@@ -576,7 +576,7 @@ function App() {
 
   const startCalibration = useCallback(() => {
     if (!isSupported) {
-      setError('Camera access is required for calibration.')
+      setError('Camera access is needed for calibration.')
       return
     }
     calibrationRef.current.status = 'running'
