@@ -549,6 +549,11 @@ function App() {
     result: null,
     error: null,
   })
+  const [neuroSummary, setNeuroSummary] = useState({
+    loading: false,
+    content: null,
+    error: null,
+  })
   const [userInfo, setUserInfo] = useState({
     age: '',
     gender: '',
@@ -594,6 +599,84 @@ function App() {
       targetLabel: calibrationPoints[0].label,
     })
   }, [isSupported, setCalibration])
+
+  const generateNeuroSummary = useCallback(async (predictionResult, age, gender) => {
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+    if (!apiKey) {
+      setNeuroSummary({
+        loading: false,
+        content: null,
+        error: 'OpenAI API key not found. Please set VITE_OPENAI_API_KEY in your .env file.',
+      })
+      return
+    }
+
+    setNeuroSummary({ loading: true, content: null, error: null })
+
+    try {
+      const prompt = `You are a medical AI assistant providing a clear, empathetic interpretation of eye-tracking assessment results for autism spectrum disorder (ASD) screening.
+
+Assessment Results:
+- Prediction: ${predictionResult.prediction}
+- ASD Probability: ${(predictionResult.probability_asd * 100).toFixed(1)}%
+- TD (Typically Developing) Probability: ${(predictionResult.probability_td * 100).toFixed(1)}%
+- Confidence Level: ${predictionResult.confidence}
+- Participant Age: ${age} years
+- Participant Gender: ${gender}
+
+Please provide a brief, professional, and compassionate summary (2-3 paragraphs) that:
+1. Explains what these results mean in plain language
+2. Interprets the probability scores and confidence level
+3. Provides appropriate context about what this assessment does and does not indicate
+4. Emphasizes that this is a screening tool and not a diagnostic tool
+5. Suggests next steps if appropriate
+
+Be empathetic, clear, and avoid medical jargon. Do not make definitive diagnoses.`
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful medical AI assistant that provides clear, empathetic interpretations of medical screening results.',
+            },
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          max_tokens: 500,
+          temperature: 0.7,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: `API error: ${response.statusText}` } }))
+        throw new Error(errorData.error?.message || `OpenAI API error: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      const summary = data.choices?.[0]?.message?.content
+
+      if (!summary) {
+        throw new Error('No summary generated from OpenAI')
+      }
+
+      setNeuroSummary({ loading: false, content: summary, error: null })
+    } catch (err) {
+      setNeuroSummary({
+        loading: false,
+        content: null,
+        error: err.message || 'Failed to generate summary',
+      })
+    }
+  }, [])
 
   const finalizeAssessment = useCallback(() => {
     if (assessmentRef.current.status !== 'running') {
@@ -647,12 +730,16 @@ function App() {
       })
       .then((data) => {
         setPrediction({ loading: false, result: data, error: null })
+        // Generate AI summary when prediction is available
+        if (data) {
+          generateNeuroSummary(data, userInfo.age, userInfo.gender)
+        }
       })
       .catch((err) => {
         setPrediction({ loading: false, result: null, error: err.message })
         setError(`Prediction failed: ${err.message}`)
       })
-  }, [userInfo.age, userInfo.gender])
+  }, [userInfo.age, userInfo.gender, generateNeuroSummary])
 
   const resetAssessment = useCallback(() => {
     revokeObjectUrl(assessmentRef.current.downloadUrl)
@@ -669,6 +756,7 @@ function App() {
       downloadUrl: '',
     }
     setCurrentImageIndex(0)
+    setNeuroSummary({ loading: false, content: null, error: null })
   }, [])
 
   const startAssessment = useCallback(() => {
@@ -1542,6 +1630,28 @@ function App() {
                   </span>
                 </div>
               </div>
+              {neuroSummary.loading && (
+                <div className="neuro-summary-loading">
+                  <p>Generating AI interpretation...</p>
+                </div>
+              )}
+              {neuroSummary.error && (
+                <div className="neuro-summary-error">
+                  <p><strong>Note:</strong> {neuroSummary.error}</p>
+                </div>
+              )}
+              {neuroSummary.content && (
+                <div className="neuro-summary">
+                  <h4>AI-Generated Interpretation</h4>
+                  <div className="neuro-summary-content">
+                    {neuroSummary.content.split('\n').map((paragraph, idx) => 
+                      paragraph.trim() ? (
+                        <p key={idx}>{paragraph.trim()}</p>
+                      ) : null
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -879,3 +879,56 @@
 .prediction-disclaimer strong {
   color: #ffc107;
 }
+
+.neuro-summary {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: rgba(11, 18, 32, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  text-align: left;
+}
+
+.neuro-summary h4 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.94);
+  text-align: center;
+}
+
+.neuro-summary-content {
+  color: rgba(226, 232, 240, 0.85);
+  line-height: 1.7;
+  font-size: 0.95rem;
+}
+
+.neuro-summary-content p {
+  margin: 0 0 1rem 0;
+}
+
+.neuro-summary-content p:last-child {
+  margin-bottom: 0;
+}
+
+.neuro-summary-loading {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  text-align: center;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.9rem;
+}
+
+.neuro-summary-error {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: rgba(239, 68, 68, 0.9);
+  font-size: 0.85rem;
+}
+
+.neuro-summary-error p {
+  margin: 0;
+}
